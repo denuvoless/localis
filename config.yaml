@@ -1,10 +1,12 @@
 bot_number: "+16121234567" # TODO: documentation. ideally, we would use a burner number or a VOIP if possible.
 allowed_area_codes:
   - "612"    # Minneapolis, for example ;)
-real_group_id: "=" # TODO: write documentation on how to get the group IDs
-decoy_group_id: "=" # TODO: write documentation on how to get the group IDs
+verified_group_id: "=" # TODO: write documentation on how to get the group IDs
+unverified_group_id: "=" # TODO: write documentation on how to get the group IDs
 admin_contact: "@placeholder.01" # this should be a username for privacy reasons.
 
 # bot profile, this is optional
 bot_name: "localis"
 bot_about: "Your neighborhood watchdog, localis."
+
+carrier_api_key: "API_KEY" # can be obtained @ https://www.abstractapi.com/api/phone-validation-api

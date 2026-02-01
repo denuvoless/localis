@@ -4,6 +4,7 @@ import yaml
 import time
 import sys
 import os
+import requests
 
 CONFIG_FILE = "config.yaml" # load configuration from config.yaml
 
@@ -18,11 +19,13 @@ def load_config():
 config = load_config()
 BOT_NUMBER = config["bot_number"]
 ALLOWED_AREA_CODES = config["allowed_area_codes"]
-VERIFIEDGROUP= config["real_group_id"]
-UNVERIFIEDGROUP = config["decoy_group_id"]
-ADMIN_CONTACT = config.get("admin_contact", "the admin")
+VERIFIEDGROUP = config["verified_group_id"]
+UNVERIFIEDGROUP = config["unverified_group_id"]
+ADMIN_CONTACT = config.get("admin_contact")
 BOT_NAME = config.get("bot_name", "localis")
 BOT_ABOUT = config.get("bot_about", "Your neighborhood watchdog, localis.")
+# defaults to empty string if missing, effectively disabling the feature
+CARRIER_API_KEY = config.get("carrier_api_key", "")
 
 def run_action_command(args):
     # signal-cli receive MUST be closed before calling this.
@@ -51,8 +54,48 @@ def configure_bot():
     with open(marker_file, "w") as f:
         f.write("configured")
 
+def check_carrier_is_mobile(phone_number):
+    if not CARRIER_API_KEY:
+        print("   Carrier Check: Disabled (No API Key).")
+        return True
+
+    print(f"   Checking carrier for {phone_number}...")
+
+    try:
+        response = requests.get(
+            "https://phoneintelligence.abstractapi.com/v1/",
+            params={"api_key": CARRIER_API_KEY, "phone": phone_number},
+            timeout=5
+        )
+
+        data = response.json()
+
+        carrier_data = data.get("phone_carrier", {})
+
+        line_type = carrier_data.get("line_type", "Unknown")
+        carrier_name = carrier_data.get("name", "Unknown")
+
+
+        print(f"      Result: Carrier='{carrier_name}', Type='{line_type}'")
+
+        # handle empty/unknown responses by allowing them (Fail Open)
+        if not line_type or line_type == "Unknown":
+            print("      Type is missing/empty. Allowing.")
+            return True
+
+        # strict check: must be explicitly 'mobile'
+        if line_type.lower() == "mobile":
+            return True
+        else:
+            return False
+
+    except Exception as e:
+        print(f"   Carrier Lookup Exception: {e}")
+        return True
+
 def handle_join_request(source):
-    # users can hide their phone number, which is represented as a UUID.
+
+    # 1. check UUID (Hidden Number) as users can hide their phone number.
     if not source.startswith("+"):
         print(f"   UUID Detected (Hidden Number).")
 
@@ -66,16 +109,27 @@ def handle_join_request(source):
         run_action_command(["send", "-m", warning_msg, source])
         return
 
+    # 2. check carrier (Optional)
+    # if API key is empty, this returns True immediately.
+    if not check_carrier_is_mobile(source):
+        print(f"   VoIP or Virtual Number Detected. Rejecting.")
+        rejection_msg = (
+            "Hi there, it seems you're using a VoIP or Virtual number.\n"
+            "To keep our neighborhood safe, we only allow mobile numbers.\n"
+            f"If this is an error, please message {ADMIN_CONTACT}."
+        )
+        run_action_command(["send", "-m", rejection_msg, source])
+        return
+
+    # 3. check area code
     area_code = source[2:5] # Assumes +1XXXYYYZZZZ
     if area_code in ALLOWED_AREA_CODES:
         print(f"   Authorized Area Code: {area_code}")
-        run_action_command(["send", "-m", "Welcome to the group!", source]) # placeholder message for testing
+        run_action_command(["send", "-m", "Welcome to the group!", source]) # TODO: make this message more friendly
         run_action_command(["updateGroup", "-g", VERIFIEDGROUP, "-m", source])
-
     else:
         print(f"   Unauthorized Area Code: {area_code} -> Routing to Unverified Group")
-
-        run_action_command(["send", "-m", "Welcome! You've been added to the group. Please message the admin at " + ADMIN_CONTACT + " to get verified.", source]) # placeholder message for testing
+        run_action_command(["send", "-m", "Welcome! You've been added to the group. Please message the admin at " + ADMIN_CONTACT + " to get verified.", source]) # TODO: make this message more friendly
         run_action_command(["updateGroup", "-g", UNVERIFIEDGROUP, "-m", source])
 
 def main():
